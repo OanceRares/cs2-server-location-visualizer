@@ -17,25 +17,27 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
-      background: rgba(0,0,0,0.75);
+      background: rgba(0,0,0,0.8);
       color: white;
       padding: 10px 18px;
       border-radius: 14px;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       font-size: 14px;
       backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.1);
     }
 
-    /* Bigger + outlined labels for readability */
+    /* Styled labels positioned above the waypoints */
     .ping-label {
       font-weight: 800;
-      font-size: 14px;
+      font-size: 13px;
+      text-align: center;
       text-shadow:
-        -2px -2px 0 #000,
-         2px -2px 0 #000,
-        -2px  2px 0 #000,
-         2px  2px 0 #000,
-         0px  0px 6px #000;
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000,
+         0px  0px 4px #000;
       white-space: nowrap;
       pointer-events: none;
     }
@@ -64,7 +66,7 @@
 </head>
 <body>
   <div class="title">
-    Click anywhere → draw connections + color‑coded ping to every CS2 server
+    Click anywhere → Server names and pings will appear above waypoints
   </div>
   <div id="map"></div>
 
@@ -105,7 +107,6 @@
 
     let connectionLayer = L.layerGroup().addTo(map);
     let clickMarker = null;
-
     const serverMarkers = [];
 
     function createWaypoint(color) {
@@ -117,13 +118,11 @@
       });
     }
 
-    // Larger waypoint markers (easier to click)
+    // Initialize markers
     servers.forEach(s => {
       const marker = L.marker([s[1], s[2]], {
         icon: createWaypoint('#888')
       }).addTo(map);
-
-      marker.bindPopup(`<b>${s[0]}</b><br>Click map to measure ping`);
 
       serverMarkers.push({ name: s[0], lat: s[1], lng: s[2], marker });
     });
@@ -134,25 +133,19 @@
       return Math.round(rttMs * 1.4 + 5);
     }
 
-    // green -> yellow -> red gradient (easier to distinguish)
     function pingColor(ms) {
-      const max = 200; // 200ms considered "bad"
+      const max = 200; 
       const t = Math.min(ms / max, 1);
-
       let r, g;
-
       if (t < 0.5) {
-        // green -> yellow
-        const k = t / 0.5; // 0..1
+        const k = t / 0.5;
         r = Math.round(255 * k);
         g = 255;
       } else {
-        // yellow -> red
-        const k = (t - 0.5) / 0.5; // 0..1
+        const k = (t - 0.5) / 0.5;
         r = 255;
         g = Math.round(255 * (1 - k));
       }
-
       return `rgb(${r},${g},0)`;
     }
 
@@ -160,37 +153,39 @@
       connectionLayer.clearLayers();
 
       if (clickMarker) map.removeLayer(clickMarker);
-
-      clickMarker = L.circleMarker(latlng, { radius: 8 }).addTo(map);
+      clickMarker = L.circleMarker(latlng, { 
+        radius: 6, 
+        color: 'white', 
+        fillColor: '#3388ff', 
+        fillOpacity: 1 
+      }).addTo(map);
 
       serverMarkers.forEach(s => {
         const serverLL = L.latLng(s.lat, s.lng);
-
         const distance = latlng.distanceTo(serverLL);
         const ping = estimatePing(distance);
         const color = pingColor(ping);
 
-        const line = L.polyline([latlng, serverLL], {
+        // Draw the connection line
+        L.polyline([latlng, serverLL], {
           color: color,
-          weight: 3,
-          opacity: 0.95
+          weight: 2,
+          opacity: 0.6,
+          dashArray: '10, 5' // Optional: dashed lines look cleaner with many connections
         }).addTo(connectionLayer);
 
-        // recolor waypoint icon
+        // Update the waypoint color
         s.marker.setIcon(createWaypoint(color));
 
-        s.marker.bindPopup(`<b>${s.name}</b><br>${ping} ms`);
-
-        const mid = L.latLng(
-          (latlng.lat + s.lat) / 2,
-          (latlng.lng + s.lng) / 2
-        );
-
-        const label = L.marker(mid, {
+        // Create the label directly at the server location
+        // The iconAnchor [50, 35] moves the text horizontally (centered) and vertically (above)
+        const label = L.marker(serverLL, {
           interactive: false,
           icon: L.divIcon({
             className: 'ping-label',
-            html: `<span style="color:${color}">${s.name} – ${ping} ms</span>`
+            html: `<div style="color:${color}">${s.name}<br>${ping} ms</div>`,
+            iconSize: [100, 40],
+            iconAnchor: [50, 45] 
           })
         });
 
