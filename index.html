@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Counter‑Strike 2 Valve Server Locations</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100vh; width: 100vw; }
+
+    .title {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(0,0,0,0.75);
+      color: white;
+      padding: 10px 18px;
+      border-radius: 14px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 14px;
+      backdrop-filter: blur(6px);
+    }
+
+    /* Bigger + outlined labels for readability */
+    .ping-label {
+      font-weight: 800;
+      font-size: 14px;
+      text-shadow:
+        -2px -2px 0 #fff,
+         2px -2px 0 #fff,
+        -2px  2px 0 #fff,
+         2px  2px 0 #fff,
+         0px  0px 6px #fff;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* Waypoint icon */
+    .waypoint {
+      width: 20px;
+      height: 20px;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      border: 2px solid white;
+      box-shadow: 0 0 6px rgba(0,0,0,0.6);
+    }
+
+    .waypoint::after {
+      content: '';
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: white;
+      border-radius: 50%;
+      top: 4px;
+      left: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="title">
+    Click anywhere → draw connections + color‑coded ping to every CS2 server
+  </div>
+  <div id="map"></div>
+
+  <script>
+    const map = L.map('map', { worldCopyJump: true }).setView([20, 0], 2);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const servers = [
+      ["Copenhagen", 55.6761, 12.5683],
+      ["Helsinki", 60.1695, 24.9354],
+      ["Paris", 48.8566, 2.3522],
+      ["Frankfurt", 50.1109, 8.6821],
+      ["Amsterdam", 52.3676, 4.9041],
+      ["Warsaw", 52.2297, 21.0122],
+      ["Madrid", 40.4168, -3.7038],
+      ["Stockholm", 59.3293, 18.0686],
+      ["London", 51.5074, -0.1278],
+      ["Toronto", 43.6532, -79.3832],
+      ["New York", 40.7128, -74.0060],
+      ["Los Angeles", 34.0522, -118.2437],
+      ["Miami", 25.7617, -80.1918],
+      ["Chicago", 41.8781, -87.6298],
+      ["Seattle", 47.6062, -122.3321],
+      ["Dallas", 32.7767, -96.7970],
+      ["Singapore", 1.3521, 103.8198],
+      ["Mumbai", 19.0760, 72.8777],
+      ["Tokyo", 35.6895, 139.6917],
+      ["Seoul", 37.5665, 126.9780],
+      ["São Paulo", -23.5505, -46.6333],
+      ["Santiago", -33.4489, -70.6693],
+      ["Johannesburg", -26.2041, 28.0473],
+      ["Sydney", -33.8688, 151.2093]
+    ];
+
+    let connectionLayer = L.layerGroup().addTo(map);
+    let clickMarker = null;
+
+    const serverMarkers = [];
+
+    function createWaypoint(color) {
+      return L.divIcon({
+        className: '',
+        html: `<div class="waypoint" style="background:${color};"></div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 20]
+      });
+    }
+
+    // Larger waypoint markers (easier to click)
+    servers.forEach(s => {
+      const marker = L.marker([s[1], s[2]], {
+        icon: createWaypoint('#888')
+      }).addTo(map);
+
+      marker.bindPopup(`<b>${s[0]}</b><br>Click map to measure ping`);
+
+      serverMarkers.push({ name: s[0], lat: s[1], lng: s[2], marker });
+    });
+
+    function estimatePing(distanceMeters) {
+      const km = distanceMeters / 1000;
+      const rttMs = (2 * km) / 200000 * 1000;
+      return Math.round(rttMs * 1.4 + 5);
+    }
+
+    // green -> yellow -> red gradient (easier to distinguish)
+    function pingColor(ms) {
+      const max = 200; // 200ms considered "bad"
+      const t = Math.min(ms / max, 1);
+
+      let r, g;
+
+      if (t < 0.5) {
+        // green -> yellow
+        const k = t / 0.5; // 0..1
+        r = Math.round(255 * k);
+        g = 255;
+      } else {
+        // yellow -> red
+        const k = (t - 0.5) / 0.5; // 0..1
+        r = 255;
+        g = Math.round(255 * (1 - k));
+      }
+
+      return `rgb(${r},${g},0)`;
+    }
+
+    function drawConnections(latlng) {
+      connectionLayer.clearLayers();
+
+      if (clickMarker) map.removeLayer(clickMarker);
+
+      clickMarker = L.circleMarker(latlng, { radius: 8 }).addTo(map);
+
+      serverMarkers.forEach(s => {
+        const serverLL = L.latLng(s.lat, s.lng);
+
+        const distance = latlng.distanceTo(serverLL);
+        const ping = estimatePing(distance);
+        const color = pingColor(ping);
+
+        const line = L.polyline([latlng, serverLL], {
+          color: color,
+          weight: 3,
+          opacity: 0.95
+        }).addTo(connectionLayer);
+
+        // recolor waypoint icon
+        s.marker.setIcon(createWaypoint(color));
+
+        s.marker.bindPopup(`<b>${s.name}</b><br>${ping} ms`);
+
+        const mid = L.latLng(
+          (latlng.lat + s.lat) / 2,
+          (latlng.lng + s.lng) / 2
+        );
+
+        const label = L.marker(mid, {
+          interactive: false,
+          icon: L.divIcon({
+            className: 'ping-label',
+            html: `<span style="color:${color}">${s.name} – ${ping} ms</span>`
+          })
+        });
+
+        connectionLayer.addLayer(label);
+      });
+    }
+
+    map.on('click', e => drawConnections(e.latlng));
+
+    const bounds = L.latLngBounds(servers.map(s => [s[1], s[2]]));
+    map.fitBounds(bounds, { padding: [40, 40] });
+  </script>
+</body>
+</html>
