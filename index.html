@@ -25,9 +25,9 @@
       font-size: 14px;
       backdrop-filter: blur(6px);
       border: 1px solid rgba(255,255,255,0.1);
+      pointer-events: none;
     }
 
-    /* Styled labels positioned above the waypoints */
     .ping-label {
       font-weight: 800;
       font-size: 13px;
@@ -42,7 +42,6 @@
       pointer-events: none;
     }
 
-    /* Waypoint icon */
     .waypoint {
       width: 20px;
       height: 20px;
@@ -66,7 +65,7 @@
 </head>
 <body>
   <div class="title">
-    Click anywhere → Server names and pings will appear above waypoints
+    Valve SDR Logic: User → Relay → Backbone → Server
   </div>
   <div id="map"></div>
 
@@ -78,31 +77,32 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
+    // Major SDR Hubs (Vienna, Frankfurt, etc. as mentioned by Reddit)
+    const relays = [
+      { name: "vie", lat: 48.2082, lng: 16.3738 },
+      { name: "fra", lat: 50.1109, lng: 8.6821 },
+      { name: "lhr", lat: 51.5074, lng: -0.1278 },
+      { name: "jfk", lat: 40.7128, lng: -74.0060 },
+      { name: "ord", lat: 41.8781, lng: -87.6298 },
+      { name: "lax", lat: 34.0522, lng: -118.2437 },
+      { name: "sin", lat: 1.3521, lng: 103.8198 },
+      { name: "tyo", lat: 35.6895, lng: 139.6917 },
+      { name: "syd", lat: -33.8688, lng: 151.2093 }
+    ];
+
     const servers = [
-      ["Copenhagen", 55.6761, 12.5683],
-      ["Helsinki", 60.1695, 24.9354],
-      ["Paris", 48.8566, 2.3522],
-      ["Frankfurt", 50.1109, 8.6821],
-      ["Amsterdam", 52.3676, 4.9041],
-      ["Warsaw", 52.2297, 21.0122],
-      ["Madrid", 40.4168, -3.7038],
-      ["Stockholm", 59.3293, 18.0686],
-      ["London", 51.5074, -0.1278],
-      ["Toronto", 43.6532, -79.3832],
-      ["New York", 40.7128, -74.0060],
-      ["Los Angeles", 34.0522, -118.2437],
-      ["Miami", 25.7617, -80.1918],
-      ["Chicago", 41.8781, -87.6298],
-      ["Seattle", 47.6062, -122.3321],
-      ["Dallas", 32.7767, -96.7970],
-      ["Singapore", 1.3521, 103.8198],
-      ["Mumbai", 19.0760, 72.8777],
-      ["Tokyo", 35.6895, 139.6917],
-      ["Seoul", 37.5665, 126.9780],
-      ["São Paulo", -23.5505, -46.6333],
-      ["Santiago", -33.4489, -70.6693],
-      ["Johannesburg", -26.2041, 28.0473],
-      ["Sydney", -33.8688, 151.2093]
+      ["Copenhagen", 55.6761, 12.5683], ["Helsinki", 60.1695, 24.9354],
+      ["Paris", 48.8566, 2.3522], ["Frankfurt", 50.1109, 8.6821],
+      ["Amsterdam", 52.3676, 4.9041], ["Warsaw", 52.2297, 21.0122],
+      ["Madrid", 40.4168, -3.7038], ["Stockholm", 59.3293, 18.0686],
+      ["London", 51.5074, -0.1278], ["Toronto", 43.6532, -79.3832],
+      ["New York", 40.7128, -74.0060], ["Los Angeles", 34.0522, -118.2437],
+      ["Miami", 25.7617, -80.1918], ["Chicago", 41.8781, -87.6298],
+      ["Seattle", 47.6062, -122.3321], ["Dallas", 32.7767, -96.7970],
+      ["Singapore", 1.3521, 103.8198], ["Mumbai", 19.0760, 72.8777],
+      ["Tokyo", 35.6895, 139.6917], ["Seoul", 37.5665, 126.9780],
+      ["São Paulo", -23.5505, -46.6333], ["Santiago", -33.4489, -70.6693],
+      ["Johannesburg", -26.2041, 28.0473], ["Sydney", -33.8688, 151.2093]
     ];
 
     let connectionLayer = L.layerGroup().addTo(map);
@@ -118,19 +118,37 @@
       });
     }
 
-    // Initialize markers
     servers.forEach(s => {
-      const marker = L.marker([s[1], s[2]], {
-        icon: createWaypoint('#888')
-      }).addTo(map);
-
+      const marker = L.marker([s[1], s[2]], { icon: createWaypoint('#888') }).addTo(map);
       serverMarkers.push({ name: s[0], lat: s[1], lng: s[2], marker });
     });
 
-    function estimatePing(distanceMeters) {
-      const km = distanceMeters / 1000;
-      const rttMs = (2 * km) / 200000 * 1000;
-      return Math.round(rttMs * 1.4 + 5);
+    // UPDATED: SDR-aware Ping Calculation
+    function estimatePing(userLatLng, s) {
+      const serverLL = L.latLng(s.lat, s.lng);
+      const directDistKm = userLatLng.distanceTo(serverLL) / 1000;
+
+      // Find the closest Valve relay to the user (Entry Point)
+      let closestRelay = relays[0];
+      let minDistToRelay = Infinity;
+      relays.forEach(r => {
+        const d = userLatLng.distanceTo(L.latLng(r.lat, r.lng)) / 1000;
+        if (d < minDistToRelay) { minDistToRelay = d; closestRelay = r; }
+      });
+
+      const distRelayToServer = L.latLng(closestRelay.lat, closestRelay.lng).distanceTo(serverLL) / 1000;
+
+      // Logic: User -> Relay (Public Internet) + Relay -> Server (Valve Backbone)
+      const internetPing = (minDistToRelay * 2 / 200000) * 1000 * 1.4; 
+      const backbonePing = (distRelayToServer * 2 / 200000) * 1000 * 1.15; 
+      
+      let totalPing = internetPing + backbonePing + 8; // 8ms processing/SDR overhead
+
+      // Hard-coded regional reality checks (The Mumbai/Joburg fix)
+      if (s.name === "Mumbai" && directDistKm > 3000) totalPing = Math.max(totalPing, 118);
+      if (s.name === "Johannesburg" && directDistKm > 3000) totalPing = Math.max(totalPing, 155);
+
+      return Math.round(totalPing);
     }
 
     function pingColor(ms) {
@@ -138,47 +156,47 @@
       const t = Math.min(ms / max, 1);
       let r, g;
       if (t < 0.5) {
-        const k = t / 0.5;
-        r = Math.round(255 * k);
-        g = 255;
+        r = Math.round(255 * (t / 0.5)); g = 255;
       } else {
-        const k = (t - 0.5) / 0.5;
-        r = 255;
-        g = Math.round(255 * (1 - k));
+        r = 255; g = Math.round(255 * (1 - (t - 0.5) / 0.5));
       }
       return `rgb(${r},${g},0)`;
     }
 
     function drawConnections(latlng) {
       connectionLayer.clearLayers();
-
       if (clickMarker) map.removeLayer(clickMarker);
-      clickMarker = L.circleMarker(latlng, { 
-        radius: 6, 
-        color: 'white', 
-        fillColor: '#3388ff', 
-        fillOpacity: 1 
-      }).addTo(map);
+      clickMarker = L.circleMarker(latlng, { radius: 6, color: 'black', weight: 2, fillColor: '#3388ff', fillOpacity: 1 }).addTo(map);
+
+      // Dash pattern: 12px dash, 14px gap
+      const pattern = '12, 14';
 
       serverMarkers.forEach(s => {
-        const serverLL = L.latLng(s.lat, s.lng);
-        const distance = latlng.distanceTo(serverLL);
-        const ping = estimatePing(distance);
+        const ping = estimatePing(latlng, s);
         const color = pingColor(ping);
+        const serverLL = L.latLng(s.lat, s.lng);
 
-        // Draw the connection line
+        // --- OUTLINED SEGMENTS LOGIC ---
+        // 1. Bottom Layer: Thick Black Dashed Line
         L.polyline([latlng, serverLL], {
-          color: color,
-          weight: 2,
-          opacity: 0.6,
-          dashArray: '10, 5' // Optional: dashed lines look cleaner with many connections
+          color: 'black',
+          weight: 6,
+          dashArray: pattern,
+          lineCap: 'butt', // Makes segments rectangular
+          interactive: false
         }).addTo(connectionLayer);
 
-        // Update the waypoint color
+        // 2. Top Layer: Thinner Colored Dashed Line (Same pattern)
+        L.polyline([latlng, serverLL], {
+          color: color,
+          weight: 3,
+          dashArray: pattern,
+          lineCap: 'butt', // Match the rectangular cap
+          interactive: false
+        }).addTo(connectionLayer);
+
         s.marker.setIcon(createWaypoint(color));
 
-        // Create the label directly at the server location
-        // The iconAnchor [50, 35] moves the text horizontally (centered) and vertically (above)
         const label = L.marker(serverLL, {
           interactive: false,
           icon: L.divIcon({
@@ -194,7 +212,6 @@
     }
 
     map.on('click', e => drawConnections(e.latlng));
-
     const bounds = L.latLngBounds(servers.map(s => [s[1], s[2]]));
     map.fitBounds(bounds, { padding: [40, 40] });
   </script>
